@@ -1,6 +1,10 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
+import { JsonStore } from "./store.js";
 import type { AgentService } from "./agent-service.js";
 
 const service = {
@@ -8,11 +12,19 @@ const service = {
   systemInfo: async () => ({}),
 } as unknown as AgentService;
 
+async function makeStore(): Promise<JsonStore> {
+  const root = await mkdtemp(path.join(tmpdir(), "launchpad-app-test-"));
+  const store = new JsonStore(path.join(root, "db.json"));
+  await store.initialize();
+  return store;
+}
+
 describe("HTTP boundary", () => {
   it("protects API routes with the configured shared token", async () => {
     const app = await createApp(
       loadConfig({ NODE_ENV: "test", APP_AUTH_TOKEN: "a-strong-test-token" }),
       service,
+      await makeStore(),
     );
     const denied = await app.inject({ method: "GET", url: "/api/agents" });
     expect(denied.statusCode).toBe(401);
@@ -27,7 +39,7 @@ describe("HTTP boundary", () => {
   });
 
   it("preserves Fastify client error status codes", async () => {
-    const app = await createApp(loadConfig({ NODE_ENV: "test" }), service);
+    const app = await createApp(loadConfig({ NODE_ENV: "test" }), service, await makeStore());
     const malformed = await app.inject({
       method: "POST",
       url: "/api/agents",

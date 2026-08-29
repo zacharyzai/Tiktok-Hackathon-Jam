@@ -7,6 +7,16 @@ import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
 import type { AgentService } from "./agent-service.js";
+import { enforceResourceFetch } from "./enforcement.js";
+import type { JsonStore } from "./store.js";
+import { readSpansForRun } from "./trace.js";
+import type { AgentToken } from "./types.js";
+
+// secretHash never leaves the server, even though it's only a hash.
+function publicToken(token: AgentToken) {
+  const { secretHash: _secretHash, ...rest } = token;
+  return rest;
+}
 
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
@@ -22,10 +32,15 @@ const updateAgentBody = createAgentBody.partial().refine(
 const messageBody = z.object({
   content: z.string().trim().min(1).max(50_000),
 });
+const resourceFetchBody = z.object({
+  resource: z.string().trim().min(1).max(200),
+  runId: z.string().uuid().optional(),
+});
 
 export async function createApp(
   config: AppConfig,
   service: AgentService,
+  store: JsonStore,
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -76,8 +91,8 @@ export async function createApp(
 
   app.post("/api/agents", async (request, reply) => {
     const body = createAgentBody.parse(request.body);
-    const agent = await service.createAgent(body);
-    return reply.code(201).send({ agent });
+    const { agent, credential } = await service.createAgent(body);
+    return reply.code(201).send({ agent, credential });
   });
 
   app.get("/api/agents/:id", async (request) => {
@@ -99,6 +114,20 @@ export async function createApp(
   app.post("/api/agents/:id/start", async (request) => {
     const { id } = agentIdParams.parse(request.params);
     return { agent: await service.startAgent(id) };
+  });
+
+  app.post("/api/agents/:id/token/revoke", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    const token = await service.revokeToken(id);
+    return { token: publicToken(token) };
+  });
+
+  app.post("/api/agents/:id/token/reissue", async (request, reply) => {
+    const { id } = agentIdParams.parse(request.params);
+    const { token, secret } = await service.reissueToken(id);
+    return reply
+      .code(201)
+      .send({ token: publicToken(token), credential: { tokenId: token.tokenId, secret } });
   });
 
   app.post("/api/agents/:id/stop", async (request) => {
@@ -126,6 +155,23 @@ export async function createApp(
   app.get("/api/runs/:id", async (request) => {
     const { id } = runIdParams.parse(request.params);
     return { run: service.getRun(id) };
+  });
+
+  app.get("/api/runs/:id/trace", async (request) => {
+    const { id } = runIdParams.parse(request.params);
+    service.getRun(id); // 404s if the run doesn't exist
+    return { spans: readSpansForRun(store, id) };
+  });
+
+  app.post("/api/resource/fetch", async (request, reply) => {
+    const body = resourceFetchBody.parse(request.body);
+    const header = request.headers["x-agent-token"];
+    const result = await enforceResourceFetch(store, config, {
+      agentTokenHeader: Array.isArray(header) ? header[0] : header,
+      resource: body.resource,
+      runId: body.runId ?? null,
+    });
+    return reply.code(result.statusCode).send(result.body);
   });
 
   if (config.nodeEnv === "production") {

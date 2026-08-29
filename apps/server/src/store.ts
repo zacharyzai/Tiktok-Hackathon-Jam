@@ -7,6 +7,8 @@ const emptyDatabase = (): Database => ({
   agents: [],
   messages: [],
   runs: [],
+  tokens: [],
+  spans: [],
 });
 
 export class JsonStore {
@@ -23,6 +25,9 @@ export class JsonStore {
       if (parsed.version !== 1 || !Array.isArray(parsed.agents)) {
         throw new Error("Unsupported database format");
       }
+      // Backfill fields added after this file was first written.
+      parsed.tokens ??= [];
+      parsed.spans ??= [];
       this.data = parsed;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {

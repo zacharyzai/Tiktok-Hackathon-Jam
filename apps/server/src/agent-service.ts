@@ -1,11 +1,13 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
 import { JsonStore } from "./store.js";
+import { writeSpan } from "./trace.js";
 import type {
   Agent,
   AgentRun,
+  AgentToken,
   AgentRunner,
   CreateAgentInput,
   Message,
@@ -15,9 +17,30 @@ import { WorkspaceManager } from "./workspace.js";
 
 const now = () => new Date().toISOString();
 
+// ponytail: single hardcoded owner stands in for real login; swap when identity exists.
+const MOCK_OWNER_ID = "user_a";
+
+function mintToken(agentId: string): { token: AgentToken; secret: string } {
+  const secret = "sk_live_" + randomBytes(32).toString("hex");
+  const token: AgentToken = {
+    tokenId: "tok_" + randomBytes(6).toString("hex"),
+    secretHash: createHash("sha256").update(secret).digest("hex"),
+    agentId,
+    ownerId: MOCK_OWNER_ID,
+    scopes: ["resource:read:" + MOCK_OWNER_ID],
+    status: "active",
+    issuedAt: now(),
+    revokedAt: null,
+  };
+  return { token, secret };
+}
+
 export class AgentService {
   private readonly activeExecutions = new Map<string, Promise<void>>();
   private readonly cancellationRequests = new Set<string>();
+  // ponytail: raw secrets live only here, never on disk. Lost on restart —
+  // an Agent using its old token in a container then just fails until reissued.
+  private readonly liveSecrets = new Map<string, string>();
 
   constructor(
     private readonly config: AppConfig,
@@ -60,7 +83,9 @@ export class AgentService {
     return agent;
   }
 
-  async createAgent(input: CreateAgentInput): Promise<Agent> {
+  async createAgent(
+    input: CreateAgentInput,
+  ): Promise<{ agent: Agent; credential: { tokenId: string; secret: string } }> {
     const timestamp = now();
     const id = randomUUID();
     const agent: Agent = {
@@ -75,9 +100,14 @@ export class AgentService {
       createdAt: timestamp,
       updatedAt: timestamp,
     };
+    const { token, secret } = mintToken(id);
+    this.liveSecrets.set(id, secret);
     await this.workspaces.create(agent);
-    await this.store.mutate((database) => database.agents.push(agent));
-    return agent;
+    await this.store.mutate((database) => {
+      database.agents.push(agent);
+      database.tokens.push(token);
+    });
+    return { agent, credential: { tokenId: token.tokenId, secret } };
   }
 
   async updateAgent(id: string, input: UpdateAgentInput): Promise<Agent> {
@@ -104,14 +134,119 @@ export class AgentService {
     return updated;
   }
 
+  // Marks the active card dead. Deliberately does NOT clear liveSecrets —
+  // the Agent keeps the now-dead card in its pocket, so its next attempt is
+  // denied with reason "revoked" instead of silently having no card at all.
+  async revokeToken(agentId: string): Promise<AgentToken> {
+    this.getAgent(agentId);
+    const revoked = await this.store.mutate((database) => {
+      const token = database.tokens.find(
+        (item) => item.agentId === agentId && item.status === "active",
+      );
+      if (!token) {
+        throw new HttpError(404, "No active token for this Agent");
+      }
+      token.status = "revoked";
+      token.revokedAt = now();
+      return structuredClone(token);
+    });
+    await writeSpan(this.store, {
+      runId: null,
+      actor: MOCK_OWNER_ID,
+      action: "token.revoke",
+      resource: revoked.tokenId,
+      tokenId: revoked.tokenId,
+      decision: "allow",
+      reason: "owner_request",
+      bytes: 0,
+    });
+    return revoked;
+  }
+
+  async reissueToken(agentId: string): Promise<{ token: AgentToken; secret: string }> {
+    this.getAgent(agentId);
+    const previouslyActive = await this.store.mutate((database) => {
+      const token = database.tokens.find(
+        (item) => item.agentId === agentId && item.status === "active",
+      );
+      if (token) {
+        token.status = "revoked";
+        token.revokedAt = now();
+        return structuredClone(token);
+      }
+      return null;
+    });
+    if (previouslyActive) {
+      await writeSpan(this.store, {
+        runId: null,
+        actor: MOCK_OWNER_ID,
+        action: "token.revoke",
+        resource: previouslyActive.tokenId,
+        tokenId: previouslyActive.tokenId,
+        decision: "allow",
+        reason: "owner_request",
+        bytes: 0,
+      });
+    }
+    const { token, secret } = mintToken(agentId);
+    this.liveSecrets.set(agentId, secret);
+    await this.store.mutate((database) => database.tokens.push(token));
+    await writeSpan(this.store, {
+      runId: null,
+      actor: MOCK_OWNER_ID,
+      action: "token.issue",
+      resource: token.tokenId,
+      tokenId: token.tokenId,
+      decision: "allow",
+      reason: "owner_request",
+      bytes: 0,
+    });
+    return { token, secret };
+  }
+
+  // Policy: credentials destroyed, audit retained. Tokens are flipped to
+  // revoked (never deleted) and every span stays — only the Agent, its
+  // messages, and its runs are removed.
   async deleteAgent(id: string): Promise<{ archivedWorkspace: string }> {
     const agent = this.getAgent(id);
     await this.cancelExecution(id);
+    this.liveSecrets.delete(id);
     const archivedWorkspace = await this.workspaces.archive(agent);
-    await this.store.mutate((database) => {
+    const revokedTokenIds = await this.store.mutate((database) => {
+      const revoked: string[] = [];
+      for (const token of database.tokens) {
+        if (token.agentId === id && token.status === "active") {
+          token.status = "revoked";
+          token.revokedAt = now();
+          revoked.push(token.tokenId);
+        }
+      }
       database.agents = database.agents.filter((item) => item.id !== id);
       database.messages = database.messages.filter((item) => item.agentId !== id);
       database.runs = database.runs.filter((item) => item.agentId !== id);
+      return revoked;
+    });
+    for (const tokenId of revokedTokenIds) {
+      await writeSpan(this.store, {
+        runId: null,
+        actor: MOCK_OWNER_ID,
+        action: "token.revoke",
+        resource: tokenId,
+        tokenId,
+        decision: "allow",
+        reason: "agent_deleted",
+        bytes: 0,
+      });
+    }
+    await writeSpan(this.store, {
+      runId: null,
+      actor: MOCK_OWNER_ID,
+      action: "agent_delete",
+      resource: id,
+      tokenId: null,
+      decision: "allow",
+      reason: "agent_deleted",
+      bytes: revokedTokenIds.length, // ponytail: repurposed as a count here, not response size
     });
     return { archivedWorkspace };
   }
@@ -240,15 +375,30 @@ export class AgentService {
         storedRun.startedAt = now();
       }
     });
+    // run.start/run.end just mark the run's shape in the trace; the run's
+    // own success/failure already lives on the AgentRun record itself, so
+    // these always log decision "allow" — they are not a policy check.
+    await writeSpan(this.store, {
+      runId: run.id,
+      actor: agentAtStart.id,
+      action: "run.start",
+      resource: "-",
+      tokenId: null,
+      decision: "allow",
+      reason: "allowed",
+      bytes: 0,
+    });
     try {
       if (this.cancellationRequests.has(agentAtStart.id)) {
         throw new RunCancelledError();
       }
       const result = await this.runner.run({
         agentId: agentAtStart.id,
+        runId: run.id,
         workspacePath: agentAtStart.workspacePath,
         prompt: run.prompt,
         threadId: agentAtStart.codexThreadId,
+        agentToken: this.liveSecrets.get(agentAtStart.id) ?? null,
       });
       const completedAt = now();
       await this.store.mutate((database) => {
@@ -272,6 +422,16 @@ export class AgentService {
         agent.lastError = null;
         agent.updatedAt = completedAt;
       });
+      await writeSpan(this.store, {
+        runId: run.id,
+        actor: agentAtStart.id,
+        action: "run.end",
+        resource: "-",
+        tokenId: null,
+        decision: "allow",
+        reason: "allowed",
+        bytes: 0,
+      });
     } catch (error) {
       const completedAt = now();
       const cancelled = error instanceof RunCancelledError;
@@ -291,6 +451,16 @@ export class AgentService {
           agent.lastError = cancelled ? null : message;
           agent.updatedAt = completedAt;
         }
+      });
+      await writeSpan(this.store, {
+        runId: run.id,
+        actor: agentAtStart.id,
+        action: "run.end",
+        resource: "-",
+        tokenId: null,
+        decision: "allow",
+        reason: "allowed",
+        bytes: 0,
       });
     }
   }

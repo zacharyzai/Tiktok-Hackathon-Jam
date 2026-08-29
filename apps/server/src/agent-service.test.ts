@@ -59,7 +59,7 @@ async function makeService(runner: AgentRunner = new FakeRunner()): Promise<Agen
 describe("Agent lifecycle", () => {
   it("creates, updates, stops, starts and deletes an Agent", async () => {
     const service = await makeService();
-    const agent = await service.createAgent({ name: "Builder" });
+    const { agent } = await service.createAgent({ name: "Builder" });
     expect(service.listAgents()).toHaveLength(1);
     expect((await service.updateAgent(agent.id, { description: "Builds apps" })).description)
       .toBe("Builds apps");
@@ -71,7 +71,7 @@ describe("Agent lifecycle", () => {
 
   it("persists a playground conversation", async () => {
     const service = await makeService();
-    const agent = await service.createAgent({ name: "Coder" });
+    const { agent } = await service.createAgent({ name: "Coder" });
     const { run } = await service.sendMessage(agent.id, "write hello world");
     await expect.poll(() => service.getRun(run.id).status).toBe("completed");
     const messages = service.getMessages(agent.id);
@@ -91,7 +91,7 @@ describe("Agent lifecycle", () => {
       isAvailable: async () => true,
     };
     const service = await makeService(runner);
-    const agent = await service.createAgent({ name: "Concurrent" });
+    const { agent } = await service.createAgent({ name: "Concurrent" });
     const attempts = await Promise.allSettled([
       service.sendMessage(agent.id, "first"),
       service.sendMessage(agent.id, "second"),
@@ -119,7 +119,7 @@ describe("Agent lifecycle", () => {
       cancel: async () => false,
       isAvailable: async () => true,
     });
-    const agent = await service.createAgent({ name: "Busy" });
+    const { agent } = await service.createAgent({ name: "Busy" });
     const { run } = await service.sendMessage(agent.id, "first");
 
     await expect(service.startAgent(agent.id)).rejects.toMatchObject({ statusCode: 409 });

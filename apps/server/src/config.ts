@@ -44,6 +44,7 @@ const envSchema = z.object({
     .string()
     .url()
     .default("https://ark.cn-beijing.volces.com/api/v3"),
+  MOCK_SERVICE_URL: z.string().url().default("http://localhost:8000"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 
@@ -87,6 +88,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     arkApiKey: env.ARK_API_KEY?.trim() ?? "",
     arkModel: env.ARK_MODEL?.trim() ?? "",
     arkBaseUrl: env.ARK_BASE_URL.replace(/\/+$/, ""),
+    mockServiceUrl: env.MOCK_SERVICE_URL.replace(/\/+$/, ""),
     nodeEnv: env.NODE_ENV,
   };
 }

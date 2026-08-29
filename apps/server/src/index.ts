@@ -15,7 +15,7 @@ const runner = createRunner(config);
 const service = new AgentService(config, store, workspaces, runner);
 await service.initialize();
 
-const app = await createApp(config, service);
+const app = await createApp(config, service, store);
 
 const shutdown = async (signal: string) => {
   app.log.info({ signal }, "Shutting down");

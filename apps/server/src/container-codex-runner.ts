@@ -71,6 +71,12 @@ export function buildContainerRunArgs(
     "--env",
     "ARK_API_KEY",
     "--env",
+    "AGENT_TOKEN",
+    "--env",
+    "AGENT_RESOURCE_ENDPOINT=http://host.docker.internal:" + config.port + "/api/resource/fetch",
+    "--env",
+    "AGENT_RUN_ID=" + request.runId,
+    "--env",
     "CODEX_HOME=/codex-home",
     "--env",
     "HOME=/tmp",
@@ -147,7 +153,7 @@ export class ContainerCodexRunner implements AgentRunner {
       buildContainerRunArgs(request, this.config),
       {
         cwd: request.workspacePath,
-        env: this.childEnvironment(),
+        env: this.childEnvironment(request.agentToken),
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -235,9 +241,10 @@ export class ContainerCodexRunner implements AgentRunner {
     }
   }
 
-  private childEnvironment(): NodeJS.ProcessEnv {
+  private childEnvironment(agentToken: string | null = null): NodeJS.ProcessEnv {
     const environment: NodeJS.ProcessEnv = {
       ARK_API_KEY: this.config.arkApiKey,
+      AGENT_TOKEN: agentToken ?? "",
       NO_COLOR: "1",
     };
     for (const name of [
