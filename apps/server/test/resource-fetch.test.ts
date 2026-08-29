@@ -14,11 +14,13 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AgentService as RealAgentService } from "../src/agent-service.js";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { JsonStore } from "../src/store.js";
+import { WorkspaceManager } from "../src/workspace.js";
 import type { AgentService } from "../src/agent-service.js";
-import type { AgentToken, TraceSpan } from "../src/types.js";
+import type { AgentRunner, AgentToken, RunnerRequest, RunnerResult, TraceSpan } from "../src/types.js";
 
 // Minimal stand-in for AgentService — the resource-fetch route never calls
 // into it, so only the shape createApp expects needs to exist.
@@ -34,6 +36,44 @@ async function makeApp() {
   const config = loadConfig({ NODE_ENV: "test" });
   const app = await createApp(config, service, store);
   return { app, store, config };
+}
+
+class FakeRunner implements AgentRunner {
+  async run(request: RunnerRequest): Promise<RunnerResult> {
+    return { output: "done: " + request.prompt, threadId: null, usage: null };
+  }
+  async cancel(): Promise<boolean> {
+    return false;
+  }
+  async isAvailable(): Promise<boolean> {
+    return true;
+  }
+}
+
+// Builds an app and a REAL AgentService sharing the same store, so a route
+// test can trigger a genuine Agent lifecycle event (e.g. deletion) and then
+// observe its effect through the actual HTTP boundary — not a hand-simulated
+// token record.
+async function makeAppWithRealAgentService() {
+  const root = await mkdtemp(path.join(tmpdir(), "launchpad-resource-fetch-svc-test-"));
+  const store = new JsonStore(path.join(root, "db.json"));
+  const config = loadConfig({
+    NODE_ENV: "test",
+    APP_DATA_DIR: path.join(root, "data"),
+    AGENT_WORKSPACE_ROOT: path.join(root, "workspaces"),
+    CODEX_HOME: path.join(root, "codex"),
+    ARK_API_KEY: "test-key",
+    ARK_MODEL: "ep-test",
+  });
+  const realService = new RealAgentService(
+    config,
+    store,
+    new WorkspaceManager(path.join(root, "workspaces")),
+    new FakeRunner(),
+  );
+  await realService.initialize();
+  const app = await createApp(config, realService, store);
+  return { app, store, config, realService };
 }
 
 // Issues a token straight into the store (bypassing AgentService, which the
@@ -193,6 +233,166 @@ describe("POST /api/resource/fetch — enforcement boundary", () => {
     const span = latestSpanFor(store.snapshot().spans, null);
     expect(span?.decision).toBe("deny");
     expect(span?.reason).toBe("unknown_token");
+
+    await app.close();
+  });
+
+  // --- Structural negative cases (v2) ---
+
+  it.each([
+    ["garbage string", "not-a-real-token-at-all"],
+    ["very long string", "x".repeat(10_000)],
+  ])("6. malformed token (%s) -> denied, no crash", async (_label, badSecret) => {
+    const { app } = await makeApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/resource/fetch",
+      headers: { "x-agent-token": badSecret },
+      payload: { resource: "user_a/notes" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ reason: "unknown_token" });
+
+    await app.close();
+  });
+
+  it("6b. empty token header -> denied as missing, no crash", async () => {
+    const { app } = await makeApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/resource/fetch",
+      headers: { "x-agent-token": "" },
+      payload: { resource: "user_a/notes" },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({ reason: "unknown_token" });
+
+    await app.close();
+  });
+
+  it("7. another Agent's valid token is still denied -> proves scoping is per-Agent, not global", async () => {
+    const { app, store } = await makeApp();
+    // Two distinct tokens for two distinct Agents, each scoped to its own owner.
+    await issueToken(store, { scopes: ["resource:read:user_a"] });
+    const { secret: bravoSecret } = await issueToken(store, {
+      scopes: ["resource:read:user_b"],
+    });
+
+    // Bravo's token is entirely valid and active — just for the wrong owner.
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/resource/fetch",
+      headers: { "x-agent-token": bravoSecret },
+      payload: { resource: "user_a/notes" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ reason: "out_of_scope" });
+
+    await app.close();
+  });
+
+  it("8. wrong HTTP method (GET on the POST route) -> no policy bypass", async () => {
+    const { app, store } = await makeApp();
+    await issueToken(store, { scopes: ["resource:read:user_a"] });
+
+    const response = await app.inject({ method: "GET", url: "/api/resource/fetch" });
+
+    expect(response.statusCode).toBe(404);
+    // No span at all — the request never reached the enforcement logic.
+    expect(store.snapshot().spans).toHaveLength(0);
+
+    await app.close();
+  });
+
+  it("9. path traversal (user_a/../user_b/notes) -> denied", async () => {
+    const { app, store } = await makeApp();
+    const { secret } = await issueToken(store, { scopes: ["resource:read:user_a"] });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/resource/fetch",
+      headers: { "x-agent-token": secret },
+      payload: { resource: "user_a/../user_b/notes" },
+    });
+
+    // Must be denied outright, not silently normalized and allowed through —
+    // Node's fetch() would otherwise collapse "../" and actually reach
+    // user_b's data while this check thinks it authorized "user_a".
+    expect(response.statusCode).toBeGreaterThanOrEqual(400);
+    expect(response.json()).not.toMatchObject({ owner: "user_b" });
+
+    await app.close();
+  });
+
+  it("10. a deleted Agent's token -> 403 revoked, via the real deletion path", async () => {
+    const { app, realService } = await makeAppWithRealAgentService();
+    const { agent, credential } = await realService.createAgent({ name: "Doomed" });
+    await realService.deleteAgent(agent.id);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/resource/fetch",
+      headers: { "x-agent-token": credential.secret },
+      payload: { resource: "user_a/notes" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ reason: "revoked" });
+
+    await app.close();
+  });
+
+  // --- Redaction assertions (v2) — assert the ABSENCE of something. You
+  // can't eyeball your way to "no secret ever leaks"; assert it and let
+  // this run in CI forever. ---
+
+  it("11. no span anywhere contains the token secret", async () => {
+    const { app, store } = await makeApp();
+    const { secret } = await issueToken(store, { scopes: ["resource:read:user_a"] });
+
+    // Exercise every branch that writes a span, all with the same secret.
+    await app.inject({
+      method: "POST",
+      url: "/api/resource/fetch",
+      headers: { "x-agent-token": secret },
+      payload: { resource: "user_a/notes" },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/resource/fetch",
+      headers: { "x-agent-token": secret },
+      payload: { resource: "user_b/notes" },
+    });
+
+    const serialized = JSON.stringify(store.snapshot().spans);
+    expect(serialized).not.toContain(secret);
+
+    await app.close();
+  });
+
+  it("12. no span contains the resource's actual content value", async () => {
+    const { app, store } = await makeApp();
+    const { secret } = await issueToken(store, { scopes: ["resource:read:user_a"] });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/resource/fetch",
+      headers: { "x-agent-token": secret },
+      payload: { resource: "user_a/notes" },
+    });
+    // Confirm the content really was fetched (so this test would fail loudly
+    // if the route stopped returning data), then confirm it never leaked
+    // into the trace store even though the route itself saw it.
+    const fetchedContent = response.json().content as string;
+    expect(fetchedContent).toBeTruthy();
+
+    const serialized = JSON.stringify(store.snapshot().spans);
+    expect(serialized).not.toContain(fetchedContent);
 
     await app.close();
   });

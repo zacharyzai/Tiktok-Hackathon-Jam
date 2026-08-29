@@ -52,6 +52,15 @@ export async function enforceResourceFetch(
     return deny(token.agentId, token.tokenId, "revoked", 403);
   }
 
+  // Strict allowlist, not a "..": denylist — closes path traversal (Node's
+  // fetch() silently collapses "../" before the request is sent, so a
+  // resource like "user_a/../user_b/notes" would authorize against "user_a"
+  // but actually fetch user_b's data) and any query/fragment injection into
+  // the mock-service URL, in one check.
+  if (!/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/.test(resource)) {
+    return deny(token.agentId, token.tokenId, "out_of_scope", 400);
+  }
+
   const owner = resource.split("/")[0];
   const requiredScope = `resource:read:${owner}`;
   if (!token.scopes.includes(requiredScope)) {
