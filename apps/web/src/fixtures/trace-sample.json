@@ -1,0 +1,62 @@
+[
+  {
+    "spanId": "sp_1",
+    "runId": "run_77",
+    "timestamp": "2026-08-29T14:00:00Z",
+    "actor": "agent_alpha",
+    "action": "run.start",
+    "resource": "-",
+    "tokenId": null,
+    "decision": "allow",
+    "reason": "allowed",
+    "bytes": 0
+  },
+  {
+    "spanId": "sp_2",
+    "runId": "run_77",
+    "timestamp": "2026-08-29T14:00:01Z",
+    "actor": "agent_alpha",
+    "action": "resource.fetch",
+    "resource": "user_a/notes",
+    "tokenId": "tok_a1b2c3",
+    "decision": "allow",
+    "reason": "allowed",
+    "bytes": 64
+  },
+  {
+    "spanId": "sp_3",
+    "runId": "run_77",
+    "timestamp": "2026-08-29T14:00:09Z",
+    "actor": "agent_alpha",
+    "action": "resource.fetch",
+    "resource": "user_b/notes",
+    "tokenId": "tok_a1b2c3",
+    "decision": "deny",
+    "reason": "out_of_scope",
+    "bytes": 0
+  },
+  {
+    "spanId": "sp_4",
+    "runId": null,
+    "timestamp": "2026-08-29T14:02:00Z",
+    "actor": "user_a",
+    "action": "token.revoke",
+    "resource": "tok_a1b2c3",
+    "tokenId": "tok_a1b2c3",
+    "decision": "allow",
+    "reason": "owner_request",
+    "bytes": 0
+  },
+  {
+    "spanId": "sp_5",
+    "runId": "run_78",
+    "timestamp": "2026-08-29T14:02:30Z",
+    "actor": "agent_alpha",
+    "action": "resource.fetch",
+    "resource": "user_a/notes",
+    "tokenId": "tok_a1b2c3",
+    "decision": "deny",
+    "reason": "revoked",
+    "bytes": 0
+  }
+]
