@@ -1,0 +1,40 @@
+{
+  "spans": [
+    {
+      "spanId": "4cd53ce6-d4bb-4ba6-8d19-1a4289a9a279",
+      "timestamp": "2026-08-29T19:34:25.052Z",
+      "runId": "2d213b6d-5bda-48ce-864a-c58a4975f6d5",
+      "actor": "28974b63-1401-45a6-90cd-f097f4cb3093",
+      "action": "run.start",
+      "resource": "-",
+      "tokenId": null,
+      "decision": "allow",
+      "reason": "allowed",
+      "bytes": 0
+    },
+    {
+      "spanId": "b3e6c05c-aff0-4d2e-9c16-90c33ffac9bf",
+      "timestamp": "2026-08-29T19:34:37.257Z",
+      "runId": "2d213b6d-5bda-48ce-864a-c58a4975f6d5",
+      "actor": "28974b63-1401-45a6-90cd-f097f4cb3093",
+      "action": "resource.fetch",
+      "resource": "user_b/notes",
+      "tokenId": "tok_026221314090",
+      "decision": "deny",
+      "reason": "out_of_scope",
+      "bytes": 0
+    },
+    {
+      "spanId": "d55a7e60-4b26-4ef6-af02-b44ac44a1e8b",
+      "timestamp": "2026-08-29T19:34:42.113Z",
+      "runId": "2d213b6d-5bda-48ce-864a-c58a4975f6d5",
+      "actor": "28974b63-1401-45a6-90cd-f097f4cb3093",
+      "action": "run.end",
+      "resource": "-",
+      "tokenId": null,
+      "decision": "allow",
+      "reason": "allowed",
+      "bytes": 0
+    }
+  ]
+}
