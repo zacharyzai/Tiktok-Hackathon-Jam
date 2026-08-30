@@ -72,7 +72,9 @@ export async function enforceResourceFetch(
   // Upgrade if the enum ever grows a "service_unavailable" reason.
   let response: Response;
   try {
-    response = await fetch(`${config.mockServiceUrl}/resources/${resource}`);
+    response = await fetch(`${config.mockServiceUrl}/resources/${resource}`, {
+      headers: { "X-Internal-Secret": config.mockServiceInternalSecret },
+    });
   } catch {
     return { statusCode: 502, body: { error: "Resource service unreachable" } };
   }

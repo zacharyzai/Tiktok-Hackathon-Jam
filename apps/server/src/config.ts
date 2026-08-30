@@ -45,6 +45,10 @@ const envSchema = z.object({
     .url()
     .default("https://ark.cn-beijing.volces.com/api/v3"),
   MOCK_SERVICE_URL: z.string().url().default("http://localhost:8000"),
+  // Not a strong secret — just enough that a direct curl to port 8000
+  // without it gets refused. Real isolation is a network boundary; this is
+  // the smallest thing that closes the opportunistic bypass for the demo.
+  MOCK_SERVICE_INTERNAL_SECRET: z.string().default("dev-only-internal-secret-change-me"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 
@@ -89,6 +93,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     arkModel: env.ARK_MODEL?.trim() ?? "",
     arkBaseUrl: env.ARK_BASE_URL.replace(/\/+$/, ""),
     mockServiceUrl: env.MOCK_SERVICE_URL.replace(/\/+$/, ""),
+    mockServiceInternalSecret: env.MOCK_SERVICE_INTERNAL_SECRET,
     nodeEnv: env.NODE_ENV,
   };
 }
