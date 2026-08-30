@@ -12,6 +12,15 @@ Volcengine ECS.
 > tracing, audit, or hardened sandbox middleware. Do not use production data or
 > credentials. See [SECURITY.md](SECURITY.md).
 
+## The Problem
+
+The Starter Kit above ships with one shared credential — every Agent uses the platform's demo bearer token. That means any Agent can reach any resource: if
+one Agent is tricked (for example, by a prompt-injected instruction hidden in a file it reads), there is nothing stopping it from touching data that isn't
+its own.
+
+This build closes that gap. Each Agent gets its own token, scoped to only the resources its owner granted. A single enforcement point checks every resource
+request against that scope — regardless of what the Agent itself believes it should be allowed to do. 
+
 ## Screenshots
 
 ### Agent Playground
@@ -229,6 +238,37 @@ Deleting an Agent archives its workspace under `workspaces/.deleted/`.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component and extension
 boundaries.
 
+## Demo Walkthrough
+
+The demo runs in five beats, each producing a row in the trace tied to a
+shared `runId`:
+
+1. **It works.** Agent-Alpha fetches its owner's data. Allowed.
+2. **It gets tricked.** A planted prompt injection tells Alpha to fetch another user's data. Alpha tries but the backend denies it based on scope.
+3. **The keycard is revoked.** Click "Revoke" in the UI. The token is dead.
+4. **The legitimate job now fails too.** Re-running the same task that worked in beat 1 is now denied, this time for a different reason (`revoked`, not `out_of_scope`).
+5. **Recovery.** A fresh token is issued. Beat 1 works again.
+
+Every step is visible in the trace timeline, which groups spans by run and makes the decision reason (`allowed`, `out_of_scope`, `revoked`, ...) legible at a glance. 
+See [docs/assets/architecture-diagram.png](docs/assets/architecture-diagram.png) for how a denied request is stopped before reaching the resource.
+
+## Deletion Policy
+
+When an Agent is deleted: **credentials are destroyed, audit history is retained.** Every token belonging to the Agent is immediately revoked, but the trace history for that Agent's past runs is never deleted. It remains
+available as evidence of what happened while the Agent was active.
+
+## Running Tests
+
+```bash
+npm test
+```
+
+This runs the server test suite in `apps/server/test/`, covering the
+enforcement middleware's allow/deny paths, structural negative cases
+(missing headers, malformed tokens, wrong HTTP methods, path traversal), and
+redaction assertions confirming no span ever contains a token secret or
+resource content.
+
 ## Validation
 
 ```bash
@@ -236,6 +276,18 @@ npm run check
 terraform fmt -check -recursive deploy/volcengine
 docker compose config
 ```
+
+## Limitations
+
+This is a hackathon proof of concept, not a production identity system:
+
+- **Mock identity** — there is one hardcoded owner (`user_a`) and no real authentication or user management.
+- **JSON store** — state is persisted to a flat JSON file, not a database; it supports a single process only.
+- **Single process** — no horizontal scaling or multi-instance coordination.
+- **No rate limiting** — the enforcement middleware checks scope and revocation status, but does not throttle request volume.
+
+These are deliberate scoping decisions for a three-day build, not oversights.
+
 
 ## Documentation
 
