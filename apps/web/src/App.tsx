@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, setAuthToken } from "./api";
+import { CredentialsPanel, type AgentToken } from "./components/CredentialsPanel";
+import { TraceTimeline, type TraceSpan } from "./components/TraceTimeline";
 import type { Agent, AgentRun, Message, SystemInfo } from "./types";
 
 const starterPrompts = [
@@ -49,6 +51,10 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
   const [authInput, setAuthInput] = useState("");
+  const [showSecurity, setShowSecurity] = useState(false);
+  const [token, setToken] = useState<AgentToken | null>(null);
+  const [spans, setSpans] = useState<TraceSpan[]>([]);
+  const [justCreatedSecret, setJustCreatedSecret] = useState<string | null>(null);
   const messageEnd = useRef<HTMLDivElement>(null);
   const selectedIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
@@ -77,6 +83,29 @@ export default function App() {
     }
   }, []);
 
+  // Pulls the Agent's real credential and the trace for its most recent
+  // run — this is the wire from the middleware we built to the panels
+  // Member 3 built against a fixture. latestRunId is optional: a brand new
+  // Agent has a token but no run yet, so there's nothing to trace.
+  const refreshSecurity = useCallback(async (agentId: string, latestRunId?: string) => {
+    try {
+      const { token: nextToken } = await api.token(agentId);
+      if (mountedRef.current && selectedIdRef.current === agentId) setToken(nextToken);
+    } catch {
+      if (mountedRef.current && selectedIdRef.current === agentId) setToken(null);
+    }
+    if (!latestRunId) {
+      if (mountedRef.current && selectedIdRef.current === agentId) setSpans([]);
+      return;
+    }
+    try {
+      const { spans: nextSpans } = await api.trace(latestRunId);
+      if (mountedRef.current && selectedIdRef.current === agentId) setSpans(nextSpans);
+    } catch {
+      if (mountedRef.current && selectedIdRef.current === agentId) setSpans([]);
+    }
+  }, []);
+
   const bootstrap = useCallback(async () => {
     await Promise.all([refreshAgents(), api.system().then(setSystem)]);
   }, [refreshAgents]);
@@ -99,6 +128,9 @@ export default function App() {
   useEffect(() => {
     setActiveRun(null);
     setShowSettings(false);
+    setJustCreatedSecret(null);
+    setToken(null);
+    setSpans([]);
     if (!selectedId) {
       setMessages([]);
       return;
@@ -108,6 +140,7 @@ export default function App() {
         if (selectedIdRef.current !== selectedId) return;
         const latest = result.runs[0] ?? null;
         setActiveRun(latest);
+        void refreshSecurity(selectedId, latest?.id);
         if (latest && ["queued", "running"].includes(latest.status)) {
           void pollRun(latest.id, selectedId).catch((reason) =>
             setError(reason instanceof Error ? reason.message : String(reason)),
@@ -117,7 +150,7 @@ export default function App() {
       .catch((reason) =>
         setError(reason instanceof Error ? reason.message : String(reason)),
       );
-  }, [refreshMessages, selectedId]);
+  }, [refreshMessages, refreshSecurity, selectedId]);
 
   useEffect(() => {
     if (selected) {
@@ -138,11 +171,13 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      const { agent } = await api.createAgent(form);
+      const { agent, credential } = await api.createAgent(form);
       await refreshAgents();
       setSelectedId(agent.id);
       setShowCreate(false);
       setForm(emptyForm);
+      setJustCreatedSecret(credential.secret);
+      setShowSecurity(true);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -184,6 +219,19 @@ export default function App() {
     }
   };
 
+  const revokeToken = async () => {
+    if (!selected) return;
+    await api.revokeToken(selected.id);
+    await refreshSecurity(selected.id, activeRun?.id);
+  };
+
+  const reissueToken = async (): Promise<string> => {
+    if (!selected) throw new Error("No Agent selected");
+    const { credential } = await api.reissueToken(selected.id);
+    await refreshSecurity(selected.id, activeRun?.id);
+    return credential.secret;
+  };
+
   const deleteAgent = async () => {
     if (!selected) return;
     if (!window.confirm("Delete " + selected.name + "? Its workspace will be archived.")) {
@@ -211,7 +259,11 @@ export default function App() {
         const result = await api.run(runId);
         if (selectedIdRef.current === agentId) setActiveRun(result.run);
         if (!["queued", "running"].includes(result.run.status)) {
-          await Promise.all([refreshMessages(agentId), refreshAgents()]);
+          await Promise.all([
+            refreshMessages(agentId),
+            refreshAgents(),
+            refreshSecurity(agentId, runId),
+          ]);
           return;
         }
       }
@@ -412,6 +464,12 @@ export default function App() {
                 </button>
                 <button
                   className="button button-ghost"
+                  onClick={() => setShowSecurity((value) => !value)}
+                >
+                  Security
+                </button>
+                <button
+                  className="button button-ghost"
                   onClick={toggleAgent}
                   disabled={busy}
                 >
@@ -475,6 +533,63 @@ export default function App() {
                   </button>
                 </div>
               </form>
+            )}
+
+            {showSecurity && (
+              <section className="settings-panel">
+                <div className="settings-title">
+                  <div>
+                    <span className="eyebrow">Identity &amp; policy</span>
+                    <h2>Credential and trace</h2>
+                  </div>
+                  <button type="button" onClick={() => setShowSecurity(false)}>×</button>
+                </div>
+
+                {justCreatedSecret && (
+                  <div style={{ marginBottom: 16 }}>
+                    <strong style={{ fontSize: 13 }}>
+                      This Agent's new credential — copy it now, it will not be shown again:
+                    </strong>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+                      <code
+                        style={{
+                          fontSize: 12,
+                          wordBreak: "break-all",
+                          background: "#fff8e1",
+                          border: "1px solid #e5c453",
+                          borderRadius: 4,
+                          padding: 8,
+                          flex: 1,
+                        }}
+                      >
+                        {justCreatedSecret}
+                      </code>
+                      <button
+                        type="button"
+                        className="button button-ghost"
+                        onClick={() => setJustCreatedSecret(null)}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {token ? (
+                  <CredentialsPanel token={token} onRevoke={revokeToken} onReissue={reissueToken} />
+                ) : (
+                  <p>No token issued for this Agent yet.</p>
+                )}
+
+                <div style={{ marginTop: 20 }}>
+                  <h3 style={{ fontSize: 14, marginBottom: 8 }}>Trace</h3>
+                  {spans.length > 0 ? (
+                    <TraceTimeline spans={spans} />
+                  ) : (
+                    <p>No trace events yet — send a message in the Playground first.</p>
+                  )}
+                </div>
+              </section>
             )}
 
             <section className="playground">

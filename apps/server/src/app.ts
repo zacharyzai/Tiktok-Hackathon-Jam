@@ -116,6 +116,11 @@ export async function createApp(
     return { agent: await service.startAgent(id) };
   });
 
+  app.get("/api/agents/:id/token", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    return { token: publicToken(service.getToken(id)) };
+  });
+
   app.post("/api/agents/:id/token/revoke", async (request) => {
     const { id } = agentIdParams.parse(request.params);
     const token = await service.revokeToken(id);

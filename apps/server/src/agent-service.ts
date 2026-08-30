@@ -134,6 +134,22 @@ export class AgentService {
     return updated;
   }
 
+  // The credentials panel's read path: whatever the Agent's most recent
+  // token is, active or revoked, so the UI can show its real current state
+  // without needing to have just witnessed it being created or reissued.
+  getToken(agentId: string): AgentToken {
+    this.getAgent(agentId);
+    const tokens = this.store
+      .snapshot()
+      .tokens.filter((item) => item.agentId === agentId)
+      .sort((left, right) => right.issuedAt.localeCompare(left.issuedAt));
+    const latest = tokens[0];
+    if (!latest) {
+      throw new HttpError(404, "No token has been issued for this Agent");
+    }
+    return latest;
+  }
+
   // Marks the active card dead. Deliberately does NOT clear liveSecrets —
   // the Agent keeps the now-dead card in its pocket, so its next attempt is
   // denied with reason "revoked" instead of silently having no card at all.

@@ -1,4 +1,8 @@
+import type { AgentToken } from "./components/CredentialsPanel";
+import type { TraceSpan } from "./components/TraceTimeline";
 import type { Agent, AgentRun, Message, SystemInfo } from "./types";
+
+type Credential = { tokenId: string; secret: string };
 
 export class ApiError extends Error {
   constructor(
@@ -41,7 +45,7 @@ export const api = {
     description: string;
     instructions: string;
   }) =>
-    request<{ agent: Agent }>("/api/agents", {
+    request<{ agent: Agent; credential: Credential }>("/api/agents", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -78,4 +82,16 @@ export const api = {
       },
     ),
   run: (id: string) => request<{ run: AgentRun }>("/api/runs/" + id),
+  token: (agentId: string) =>
+    request<{ token: AgentToken }>("/api/agents/" + agentId + "/token"),
+  revokeToken: (agentId: string) =>
+    request<{ token: AgentToken }>("/api/agents/" + agentId + "/token/revoke", {
+      method: "POST",
+    }),
+  reissueToken: (agentId: string) =>
+    request<{ token: AgentToken; credential: Credential }>(
+      "/api/agents/" + agentId + "/token/reissue",
+      { method: "POST" },
+    ),
+  trace: (runId: string) => request<{ spans: TraceSpan[] }>("/api/runs/" + runId + "/trace"),
 };
