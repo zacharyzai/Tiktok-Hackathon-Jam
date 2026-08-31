@@ -11,7 +11,9 @@ credentials, personal data, or exploit details in an issue.
 
 ## Known limitations
 
-- Shared demo token; no user identity, authorization, RBAC, or tenant isolation
+- Per-Agent tokens and scoped authorization exist (see `enforcement.ts`), but
+  there is no real human login, RBAC, or multi-tenant isolation — one
+  hardcoded owner stands in for a real user
 - No CSRF protection
 - No per-Agent container boundary in ECS mode
 - Ordinary local containers, not hardened multi-tenant sandboxes
