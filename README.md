@@ -101,6 +101,19 @@ script automatically selects Docker, Colima, or Podman, generates a control
 plane access token, and prints it — **copy that token**, you'll need it in
 the next step. It also warns if the mock service from step 3 isn't running.
 
+**For a live demo or recording**, don't rely on the auto-generated token — a
+browser refresh loses it (it lives in memory, not storage, deliberately —
+see Security), and every restart generates a new one. Export a stable,
+obviously-fake value yourself before starting:
+
+```bash
+export APP_AUTH_TOKEN=demo-operator-token-not-a-real-secret
+npm run poc
+```
+
+It's safe to show on screen: the name says what it is, and it isn't derived
+from or connected to any real credential.
+
 ### 5. Open the browser
 
 Visit <http://localhost:3000>, or open it from the terminal:
@@ -269,6 +282,35 @@ shared `runId`:
 
 Every step is visible in the trace timeline, which groups spans by run and makes the decision reason (`allowed`, `out_of_scope`, `revoked`, ...) legible at a glance. 
 See [docs/assets/architecture-diagram.png](docs/assets/architecture-diagram.png) for how a denied request is stopped before reaching the resource.
+
+## Threats Found and Closed
+
+Three real bypasses were found by testing this build against itself, not
+hypothesized. Each is fixed; none is theoretical.
+
+1. **Path traversal.** `resource: "user_a/../user_b/notes"` would pass the
+   scope check against `user_a` (the first path segment), but the outgoing
+   `fetch()` call lets Node's URL parser silently collapse `../` — the real
+   request would hit `user_b`'s data. Fixed with a strict allowlist on the
+   resource shape instead of blacklisting `..`.
+2. **Direct bypass of the enforcement layer.** `curl` straight to the mock
+   service's port skipped every check in `enforcement.ts` entirely, since
+   the mock service has no authentication of its own by design. Fixed with
+   a shared internal secret only the real backend knows.
+3. **Unauthenticated control plane.** The most interesting one: this
+   doesn't defeat `enforceResourceFetch` at all — it walks around it. With
+   no human-principal auth configured, an Agent that knows this server's
+   own address (it's injected into its container on purpose) could call
+   `GET /api/agents` to enumerate every Agent, then `POST
+   /api/agents/:id/token/reissue` to mint itself a fresh, genuinely valid
+   credential for a *different* Agent. `enforceResourceFetch` correctly
+   allows the resulting request — the keycard is real. The trace even
+   recorded the theft as a legitimate `owner_request`. The lock on the
+   resource endpoint worked perfectly; the front desk one door over had no
+   badge check at all. Fixed by requiring a human bearer token on every
+   control-plane route except the Agent's own scoped one (which has its own
+   independent check, so this doesn't weaken it — it closes the *other*
+   door).
 
 ## Deletion Policy
 

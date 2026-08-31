@@ -158,9 +158,17 @@ export CONTAINER_RUNTIME_IMAGE="$runtime_image"
 # address) can list every Agent and mint itself a fresh token for any of
 # them. /api/resource/fetch stays reachable either way — it has its own
 # separate X-Agent-Token check.
-export APP_AUTH_TOKEN="${APP_AUTH_TOKEN:-$(head -c 18 /dev/urandom | xxd -p | tr -d '\n')}"
-log "Control plane access token (paste into the browser's unlock screen):"
-log "  $APP_AUTH_TOKEN"
+if [[ -n "${APP_AUTH_TOKEN:-}" ]]; then
+  log "Control plane access token: set via APP_AUTH_TOKEN (paste into the browser's unlock screen)."
+else
+  # A fresh random token every run is correct for a real deployment, but it
+  # means a token you noted from an earlier run stops working after a
+  # restart — annoying mid-demo. For a rehearsed demo, export a stable,
+  # obviously-fake value yourself instead: APP_AUTH_TOKEN=demo-operator-token-not-a-real-secret
+  export APP_AUTH_TOKEN="$(head -c 18 /dev/urandom | xxd -p | tr -d '\n')"
+  log "Control plane access token (paste into the browser's unlock screen):"
+  log "  $APP_AUTH_TOKEN"
+fi
 
 if ! curl -s -o /dev/null -m 2 "http://localhost:8000/health" 2>/dev/null; then
   log "WARNING: mock-service is not reachable at http://localhost:8000."
