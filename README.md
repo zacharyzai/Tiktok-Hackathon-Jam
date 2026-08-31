@@ -8,9 +8,11 @@ Run it locally with Docker, Colima, or rootless Podman, or deploy it to
 Volcengine ECS.
 
 > [!WARNING]
-> This is a single-user proof of concept. It intentionally has no identity,
-> tracing, audit, or hardened sandbox middleware. Do not use production data or
-> credentials. See [SECURITY.md](SECURITY.md).
+> This is a single-user proof of concept. It has per-Agent tokens, scoped
+> authorization, revocation, and correlated trace/audit spans (see "The
+> Problem" below) — but no real human login, RBAC, multi-tenant isolation, or
+> hardened sandbox beyond the Starter Kit's default container limits. Do not
+> use production data or credentials. See [SECURITY.md](SECURITY.md).
 
 ## The Problem
 
