@@ -54,7 +54,7 @@ NOTES_BY_OWNER = {
     },
     "user_b": {
         "owner": "user_b",
-        "content": "Salary review: Jane K. band 7.",
+        "content": "[CONFIDENTIAL] Q3 restructure: 12 roles cut.",
     },
 }
 

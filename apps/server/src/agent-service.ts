@@ -257,7 +257,7 @@ export class AgentService {
     await writeSpan(this.store, {
       runId: null,
       actor: MOCK_OWNER_ID,
-      action: "agent_delete",
+      action: "agent.delete",
       resource: id,
       tokenId: null,
       decision: "allow",

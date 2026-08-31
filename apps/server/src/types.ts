@@ -61,7 +61,7 @@ export interface TraceSpan {
   runId: string | null; // ties the span to a platform Run
   timestamp: string;
   actor: string; // "agent_alpha" or "user_a"
-  action: "run.start" | "run.end" | "resource.fetch" | "token.issue" | "token.revoke" | "agent_delete";
+  action: "run.start" | "run.end" | "resource.fetch" | "token.issue" | "token.revoke" | "agent.delete";
   resource: string;
   tokenId: string | null; // NEVER the secret
   decision: "allow" | "deny";
