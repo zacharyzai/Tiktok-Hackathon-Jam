@@ -19,6 +19,14 @@ services:
       AGENT_WORKSPACE_ROOT: /app/workspaces
       CODEX_HOME: /app/codex-home
       CODEX_SANDBOX_MODE: ${CODEX_SANDBOX_MODE:-workspace-write}
+      # Blank on purpose: whatever ARK_API_KEY the env_file loaded gets
+      # overridden to empty here, so `docker compose config` never prints
+      # the real key. The app reads it from the mounted secret file below
+      # instead — see secrets/README.md for the one-time setup step.
+      ARK_API_KEY: ""
+      ARK_API_KEY_FILE: /run/secrets/ark_api_key
+    secrets:
+      - ark_api_key
     ports:
       - "${PUBLIC_PORT:-3000}:3000"
     volumes:
@@ -33,3 +41,7 @@ services:
     pids_limit: 512
     mem_limit: 4g
     cpus: 2
+
+secrets:
+  ark_api_key:
+    file: ${ARK_API_KEY_FILE_PATH:-./secrets/ark_api_key.txt}

@@ -17,3 +17,6 @@ deploy/volcengine/terraform.tfvars
 mock-service/venv/
 mock-service/__pycache__/
 *.pyc
+secrets/*
+!secrets/*.example
+!secrets/README.md

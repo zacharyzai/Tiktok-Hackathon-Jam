@@ -128,7 +128,6 @@ export default function App() {
   useEffect(() => {
     setActiveRun(null);
     setShowSettings(false);
-    setJustCreatedSecret(null);
     setToken(null);
     setSpans([]);
     if (!selectedId) {
@@ -392,7 +391,10 @@ export default function App() {
             <button
               className={"agent-card " + (agent.id === selectedId ? "selected" : "")}
               key={agent.id}
-              onClick={() => setSelectedId(agent.id)}
+              onClick={() => {
+                setJustCreatedSecret(null);
+                setSelectedId(agent.id);
+              }}
             >
               <div className="agent-avatar">{agent.name.slice(0, 1).toUpperCase()}</div>
               <div className="agent-card-copy">

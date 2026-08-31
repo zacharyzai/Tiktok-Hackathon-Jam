@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -39,6 +40,11 @@ const envSchema = z.object({
     .regex(/^[A-Za-z0-9._~-]*$/, "APP_AUTH_TOKEN must use URL-safe characters")
     .optional(),
   ARK_API_KEY: z.string().optional(),
+  // Docker-secrets path: a file mounted at runtime (e.g. /run/secrets/ark_api_key)
+  // instead of a plain env var, so `docker compose config` never prints the
+  // real key. Takes priority over ARK_API_KEY when set. npm run poc doesn't
+  // use this at all — it reads ARK_API_KEY directly, same as always.
+  ARK_API_KEY_FILE: z.string().optional(),
   ARK_MODEL: z.string().optional(),
   ARK_BASE_URL: z
     .string()
@@ -53,6 +59,22 @@ const envSchema = z.object({
 });
 
 export type AppConfig = ReturnType<typeof loadConfig>;
+
+function resolveArkApiKey(env: z.infer<typeof envSchema>): string {
+  if (env.ARK_API_KEY_FILE) {
+    try {
+      return readFileSync(env.ARK_API_KEY_FILE, "utf8").trim();
+    } catch (error) {
+      throw new Error(
+        "ARK_API_KEY_FILE is set to " +
+          env.ARK_API_KEY_FILE +
+          " but that file could not be read: " +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+  return env.ARK_API_KEY?.trim() ?? "";
+}
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
   const env = envSchema.parse(environment);
@@ -89,7 +111,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     containerUser: env.CONTAINER_USER?.trim() || defaultContainerUser,
     runtimeInstanceId: env.RUNTIME_INSTANCE_ID,
     authToken,
-    arkApiKey: env.ARK_API_KEY?.trim() ?? "",
+    arkApiKey: resolveArkApiKey(env),
     arkModel: env.ARK_MODEL?.trim() ?? "",
     arkBaseUrl: env.ARK_BASE_URL.replace(/\/+$/, ""),
     mockServiceUrl: env.MOCK_SERVICE_URL.replace(/\/+$/, ""),
