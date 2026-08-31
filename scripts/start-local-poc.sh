@@ -172,7 +172,7 @@ fi
 
 if ! curl -s -o /dev/null -m 2 "http://localhost:8000/health" 2>/dev/null; then
   log "WARNING: mock-service is not reachable at http://localhost:8000."
-  log "  Resource-fetch calls will 502 until you start it: cd mock-service && ./venv/bin/python3 main.py"
+  log "  Resource-fetch calls will 502 until you start it: ./scripts/start-mock-service.sh"
 fi
 
 cleanup() {
