@@ -76,7 +76,19 @@ cd volc-agent-launchpad
 
 Skip this step when already working from the repository root.
 
-### 3. Start the POC
+### 3. Start the mock resource service
+
+The Agent-scoped-access demo (Task 2 below) needs a protected resource to
+fetch from. In a separate terminal:
+
+```bash
+./scripts/start-mock-service.sh
+```
+
+First run creates a venv and installs dependencies. Leave it running — Beat 1
+of the demo returns `502 Resource service unreachable` without it.
+
+### 4. Start the POC
 
 ```bash
 ARK_API_KEY=your-ark-api-key \
@@ -85,9 +97,11 @@ npm run poc
 ```
 
 The first run installs Node.js dependencies and builds the Runtime image. The
-script automatically selects Docker, Colima, or Podman.
+script automatically selects Docker, Colima, or Podman, generates a control
+plane access token, and prints it — **copy that token**, you'll need it in
+the next step. It also warns if the mock service from step 3 isn't running.
 
-### 4. Open the browser
+### 5. Open the browser
 
 Visit <http://localhost:3000>, or open it from the terminal:
 
@@ -96,7 +110,9 @@ open http://localhost:3000       # macOS
 xdg-open http://localhost:3000   # Linux desktop
 ```
 
-In the Web UI:
+Paste the access token printed in step 4 into the unlock screen — this is
+the human operator's credential, separate from any Agent's own token. In the
+Web UI:
 
 1. Select **Create Agent**.
 2. Enter a name, description, and workspace instructions.
@@ -110,7 +126,7 @@ In the Web UI:
 The Agent can write files, run commands, and continue the same Codex session in
 later messages.
 
-### 5. Stop and resume
+### 6. Stop and resume
 
 Press `Ctrl+C` in the startup terminal. The script removes temporary Runtime
 containers but keeps Agent workspaces and conversations.

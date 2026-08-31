@@ -62,7 +62,12 @@ export async function createApp(
       !config.authToken ||
       !request.url.startsWith("/api/") ||
       request.url === "/api/health" ||
-      request.url === "/api/auth"
+      request.url === "/api/auth" ||
+      // Agent principal, not human principal: authenticated by its own
+      // X-Agent-Token header and authorized by enforceResourceFetch. This is
+      // the ONLY control-plane route the Agent Runtime container may reach —
+      // everything else here requires the human's bearer token.
+      request.url === "/api/resource/fetch"
     ) {
       return;
     }

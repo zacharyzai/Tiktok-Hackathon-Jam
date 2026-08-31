@@ -65,7 +65,14 @@ export interface TraceSpan {
   resource: string;
   tokenId: string | null; // NEVER the secret
   decision: "allow" | "deny";
-  reason: "allowed" | "out_of_scope" | "revoked" | "unknown_token" | "owner_request" | "agent_deleted";
+  reason:
+    | "allowed"
+    | "out_of_scope"
+    | "revoked"
+    | "unknown_token"
+    | "owner_request"
+    | "agent_deleted"
+    | "service_unavailable";
   bytes: number; // size of the response; NEVER the body itself
 }
 

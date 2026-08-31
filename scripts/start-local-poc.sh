@@ -153,6 +153,20 @@ export RUNTIME_PROVIDER=container
 export CONTAINER_ENGINE="$engine"
 export CONTAINER_RUNTIME_IMAGE="$runtime_image"
 
+# Without this, the control plane is unauthenticated: any request (including
+# one an injected Agent could send to itself, since it knows this server's
+# address) can list every Agent and mint itself a fresh token for any of
+# them. /api/resource/fetch stays reachable either way — it has its own
+# separate X-Agent-Token check.
+export APP_AUTH_TOKEN="${APP_AUTH_TOKEN:-$(head -c 18 /dev/urandom | xxd -p | tr -d '\n')}"
+log "Control plane access token (paste into the browser's unlock screen):"
+log "  $APP_AUTH_TOKEN"
+
+if ! curl -s -o /dev/null -m 2 "http://localhost:8000/health" 2>/dev/null; then
+  log "WARNING: mock-service is not reachable at http://localhost:8000."
+  log "  Resource-fetch calls will 502 until you start it: cd mock-service && ./venv/bin/python3 main.py"
+fi
+
 cleanup() {
   local container_ids
   container_ids="$($engine ps --all --quiet \

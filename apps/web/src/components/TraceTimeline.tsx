@@ -21,7 +21,8 @@ export type TraceSpan = {
     | "revoked"
     | "unknown_token"
     | "owner_request"
-    | "agent_deleted";
+    | "agent_deleted"
+    | "service_unavailable";
   bytes: number;
 };
 

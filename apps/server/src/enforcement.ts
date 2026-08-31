@@ -67,22 +67,42 @@ export async function enforceResourceFetch(
     return deny(token.agentId, token.tokenId, "out_of_scope", 403);
   }
 
-  // ponytail: mock service unreachable is an infra failure, not a policy
-  // decision — no "reason" in the frozen enum fits it, so no span here.
-  // Upgrade if the enum ever grows a "service_unavailable" reason.
+  // An infra failure here is still a real event on this run — it must not
+  // be a blind spot in the trace just because it isn't a policy decision.
+  const serviceFailure = async (message: string, bytes: number): Promise<ResourceFetchResult> => {
+    await writeSpan(store, {
+      runId,
+      actor: token.agentId,
+      action: "resource.fetch",
+      resource,
+      tokenId: token.tokenId,
+      decision: "deny",
+      reason: "service_unavailable",
+      bytes,
+    });
+    return { statusCode: 502, body: { error: message } };
+  };
+
   let response: Response;
   try {
     response = await fetch(`${config.mockServiceUrl}/resources/${resource}`, {
       headers: { "X-Internal-Secret": config.mockServiceInternalSecret },
     });
   } catch {
-    return { statusCode: 502, body: { error: "Resource service unreachable" } };
+    return serviceFailure("Resource service unreachable", 0);
   }
   if (!response.ok) {
-    return { statusCode: 502, body: { error: "Resource service error" } };
+    return serviceFailure("Resource service error", 0);
   }
 
   const text = await response.text();
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return serviceFailure("Resource service returned an invalid response", Buffer.byteLength(text));
+  }
+
   await writeSpan(store, {
     runId,
     actor: token.agentId,
@@ -93,5 +113,5 @@ export async function enforceResourceFetch(
     reason: "allowed",
     bytes: Buffer.byteLength(text),
   });
-  return { statusCode: 200, body: JSON.parse(text) };
+  return { statusCode: 200, body };
 }

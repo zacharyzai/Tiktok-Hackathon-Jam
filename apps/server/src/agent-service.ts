@@ -17,7 +17,7 @@ import { WorkspaceManager } from "./workspace.js";
 
 const now = () => new Date().toISOString();
 
-// ponytail: single hardcoded owner stands in for real login; swap when identity exists.
+// NOTE: single hardcoded owner stands in for real login; swap when identity exists.
 const MOCK_OWNER_ID = "user_a";
 
 function mintToken(agentId: string): { token: AgentToken; secret: string } {
@@ -38,7 +38,7 @@ function mintToken(agentId: string): { token: AgentToken; secret: string } {
 export class AgentService {
   private readonly activeExecutions = new Map<string, Promise<void>>();
   private readonly cancellationRequests = new Set<string>();
-  // ponytail: raw secrets live only here, never on disk. Lost on restart —
+  // NOTE: raw secrets live only here, never on disk. Lost on restart —
   // an Agent using its old token in a container then just fails until reissued.
   private readonly liveSecrets = new Map<string, string>();
 
@@ -262,7 +262,9 @@ export class AgentService {
       tokenId: null,
       decision: "allow",
       reason: "agent_deleted",
-      bytes: revokedTokenIds.length, // ponytail: repurposed as a count here, not response size
+      // bytes stays 0, per the frozen contract — the revoked count is
+      // already derivable by counting the token.revoke spans just above.
+      bytes: 0,
     });
     return { archivedWorkspace };
   }
